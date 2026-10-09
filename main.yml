@@ -1,0 +1,66 @@
+name: Verify and build Vezaro APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.0'
+          channel: stable
+          cache: true
+
+      # The source archive intentionally omits generated Gradle wrapper binaries.
+      # Generate a clean template and copy only wrapper files so custom Android
+      # sources (including the Vezaro storage MethodChannel) are never overwritten.
+      - name: Prepare Gradle wrapper without overwriting app sources
+        run: |
+          flutter create --platforms=android --org com.vezaro --project-name vezaro /tmp/vezaro-wrapper-template
+          mkdir -p android/gradle/wrapper
+          cp /tmp/vezaro-wrapper-template/android/gradlew android/gradlew
+          cp /tmp/vezaro-wrapper-template/android/gradlew.bat android/gradlew.bat
+          cp /tmp/vezaro-wrapper-template/android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.jar
+          cat > android/gradle/wrapper/gradle-wrapper.properties <<'PROPERTIES'
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-all.zip
+PROPERTIES
+          chmod +x android/gradlew
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vezaro-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7
